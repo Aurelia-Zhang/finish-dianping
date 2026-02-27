@@ -14,6 +14,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import org.redisson.api.RBloomFilter;
+
 import static com.hmdp.utils.RedisConstants.CACHE_NULL_TTL;
 import static com.hmdp.utils.RedisConstants.LOCK_SHOP_KEY;
 
@@ -163,6 +165,42 @@ public class CacheClient {
             unlock(lockKey);
         }
         // 8.返回
+        return r;
+    }
+
+    /**
+     * 布隆过滤器方案解决缓存穿透
+     * 查询前先通过布隆过滤器判断数据是否存在，不存在则直接拦截，不查数据库
+     *
+     * @param bloomFilter Redisson 布隆过滤器实例
+     */
+    public <R, ID> R queryWithBloomFilter(
+            String keyPrefix, ID id, Class<R> type,
+            Function<ID, R> dbFallback, Long time, TimeUnit unit,
+            RBloomFilter<ID> bloomFilter) {
+        // 1.布隆过滤器判断：不存在则一定不存在，直接拦截
+        if (!bloomFilter.contains(id)) {
+            log.debug("布隆过滤器拦截: key={}{} 不存在", keyPrefix, id);
+            return null;
+        }
+
+        String key = keyPrefix + id;
+        // 2.从redis查询缓存
+        String json = stringRedisTemplate.opsForValue().get(key);
+        // 3.缓存命中，直接返回
+        if (StrUtil.isNotBlank(json)) {
+            return JSONUtil.toBean(json, type);
+        }
+
+        // 4.缓存未命中，查询数据库（布隆过滤器说存在，但有极小概率误判）
+        R r = dbFallback.apply(id);
+        if (r == null) {
+            // 布隆过滤器误判，数据实际不存在，缓存短期空值兜底
+            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+            return null;
+        }
+        // 5.存在，写入redis
+        this.set(key, r, time, unit);
         return r;
     }
 

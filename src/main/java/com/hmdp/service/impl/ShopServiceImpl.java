@@ -9,6 +9,10 @@ import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.SystemConstants;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RBloomFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
 import org.springframework.data.geo.GeoResults;
@@ -32,6 +36,7 @@ import static com.hmdp.utils.RedisConstants.*;
  * @author 虎哥
  * @since 2021-12-22
  */
+@Slf4j
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
@@ -42,11 +47,34 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private CacheClient cacheClient;
 
+    /**
+     * 缓存穿透防护策略: cache-null（缓存空值）或 bloom-filter（布隆过滤器）
+     */
+    @Value("${hmdp.cache.anti-penetration:cache-null}")
+    private String antiPenetrationStrategy;
+
+    /**
+     * 布隆过滤器（仅在 bloom-filter 模式下由 BloomFilterConfig 注入，其他模式下为 null）
+     */
+    @Autowired(required = false)
+    private RBloomFilter<Long> shopBloomFilter;
+
     @Override
     public Result queryById(Long id) {
-        // 解决缓存穿透
-        Shop shop = cacheClient
-                .queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        Shop shop;
+
+        if ("bloom-filter".equals(antiPenetrationStrategy) && shopBloomFilter != null) {
+            // 布隆过滤器方案解决缓存穿透
+            log.debug("使用布隆过滤器方案查询商铺, id={}", id);
+            shop = cacheClient.queryWithBloomFilter(
+                    CACHE_SHOP_KEY, id, Shop.class, this::getById,
+                    CACHE_SHOP_TTL, TimeUnit.MINUTES, shopBloomFilter);
+        } else {
+            // 缓存空值方案解决缓存穿透（默认）
+            shop = cacheClient.queryWithPassThrough(
+                    CACHE_SHOP_KEY, id, Shop.class, this::getById,
+                    CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        }
 
         // 互斥锁解决缓存击穿
         // Shop shop = cacheClient

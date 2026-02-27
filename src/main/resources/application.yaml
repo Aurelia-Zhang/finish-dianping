@@ -39,3 +39,6 @@ logging:
 hmdp:
   mq:
     type: ${MQ_TYPE:redis-stream}
+  cache:
+    # 缓存穿透防护策略: cache-null（缓存空值） 或 bloom-filter（布隆过滤器）
+    anti-penetration: ${CACHE_ANTI_PENETRATION:cache-null}

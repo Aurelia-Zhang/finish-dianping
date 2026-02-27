@@ -36,8 +36,8 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     ports:
-      - "5672:5672"    # AMQP 协议端口
-      - "15672:15672"  # 管理界面端口（浏览器访问 http://localhost:15672）
+      - "5672:5672" # AMQP 协议端口
+      - "15672:15672" # 管理界面端口（浏览器访问 http://localhost:15672）
     volumes:
       - hmdp-rabbitmq-data:/var/lib/rabbitmq
 
@@ -67,6 +67,8 @@ services:
       - RABBITMQ_PASS=guest
       # 消息队列类型: redis-stream 或 rabbitmq（切换这里即可）
       - MQ_TYPE=rabbitmq
+      # 缓存穿透防护策略: cache-null 或 bloom-filter
+      - CACHE_ANTI_PENETRATION=cache-null
       # 设置容器时区
       - TZ=Asia/Shanghai
     logging:

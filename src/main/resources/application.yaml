@@ -5,19 +5,27 @@ spring:
     name: hmdp
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC
-    username: root
-    password: 123
+    url: jdbc:mysql://${MYSQL_HOST:db}:3306/hmdp?useSSL=false&serverTimezone=UTC
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASS:123}
   redis:
-    host: 192.168.150.101
-    port: 6379
-    password: 123321
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASS:123321}
     lettuce:
       pool:
         max-active: 10
         max-idle: 10
         min-idle: 1
         time-between-eviction-runs: 10s
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASS:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual # 手动ACK，保证消息可靠性
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
@@ -27,3 +35,7 @@ logging:
     com.hmdp: debug
   pattern:
     dateformat: mm:ss.SSS
+# 消息队列类型: redis-stream 或 rabbitmq
+hmdp:
+  mq:
+    type: ${MQ_TYPE:redis-stream}

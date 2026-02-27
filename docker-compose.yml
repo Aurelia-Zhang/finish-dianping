@@ -1,0 +1,81 @@
+services:
+  # MySQL 数据库服务
+  db:
+    image: mysql:5.7
+    container_name: hmdp-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 123
+      MYSQL_DATABASE: hmdp
+    ports:
+      - "3306:3306"
+    volumes:
+      # 挂载数据卷实现数据持久化
+      - hmdp-mysql-data:/var/lib/mysql
+      # 挂载初始化 SQL 脚本
+      - ./src/main/resources/db/hmdp.sql:/docker-entrypoint-initdb.d/hmdp.sql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Redis 缓存服务
+  redis:
+    image: redis:6.2-alpine
+    container_name: hmdp-redis
+    restart: always
+    command: redis-server --requirepass 123321
+    ports:
+      - "6379:6379"
+    volumes:
+      - hmdp-redis-data:/data
+
+  # RabbitMQ 消息队列服务
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    container_name: hmdp-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # AMQP 协议端口
+      - "15672:15672"  # 管理界面端口（浏览器访问 http://localhost:15672）
+    volumes:
+      - hmdp-rabbitmq-data:/var/lib/rabbitmq
+
+  # Spring Boot 应用服务
+  app:
+    build: .
+    container_name: hmdp-app
+    restart: always
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+    ports:
+      - "8081:8081"
+    environment:
+      # 注入 Docker 内部的网络连接信息
+      - MYSQL_HOST=db
+      - MYSQL_USER=root
+      - MYSQL_PASS=123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASS=123321
+      # RabbitMQ 连接信息
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
+      # 消息队列类型: redis-stream 或 rabbitmq（切换这里即可）
+      - MQ_TYPE=rabbitmq
+      # 设置容器时区
+      - TZ=Asia/Shanghai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hmdp-mysql-data:
+  hmdp-redis-data:
+  hmdp-rabbitmq-data:

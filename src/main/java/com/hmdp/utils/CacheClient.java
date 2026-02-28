@@ -1,10 +1,12 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RBloomFilter;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -14,8 +16,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-import org.redisson.api.RBloomFilter;
-
 import static com.hmdp.utils.RedisConstants.CACHE_NULL_TTL;
 import static com.hmdp.utils.RedisConstants.LOCK_SHOP_KEY;
 
@@ -24,11 +24,13 @@ import static com.hmdp.utils.RedisConstants.LOCK_SHOP_KEY;
 public class CacheClient {
 
     private final StringRedisTemplate stringRedisTemplate;
+    private final RedissonClient redissonClient;
 
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
-    public CacheClient(StringRedisTemplate stringRedisTemplate) {
+    public CacheClient(StringRedisTemplate stringRedisTemplate, RedissonClient redissonClient) {
         this.stringRedisTemplate = stringRedisTemplate;
+        this.redissonClient = redissonClient;
     }
 
     public void set(String key, Object value, Long time, TimeUnit unit) {
@@ -95,9 +97,10 @@ public class CacheClient {
         }
         // 5.2.已过期，需要缓存重建
         // 6.缓存重建
-        // 6.1.获取互斥锁
+        // 6.1.获取 Redisson 互斥锁
         String lockKey = LOCK_SHOP_KEY + id;
-        boolean isLock = tryLock(lockKey);
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean isLock = lock.tryLock();
         // 6.2.判断是否获取锁成功
         if (isLock){
             // 6.3.成功，开启独立线程，实现缓存重建
@@ -111,7 +114,7 @@ public class CacheClient {
                     throw new RuntimeException(e);
                 }finally {
                     // 释放锁
-                    unlock(lockKey);
+                    lock.unlock();
                 }
             });
         }
@@ -136,12 +139,13 @@ public class CacheClient {
         }
 
         // 4.实现缓存重建
-        // 4.1.获取互斥锁
+        // 4.1.获取 Redisson 互斥锁（自带 WatchDog 续期，解锁有身份校验）
         String lockKey = LOCK_SHOP_KEY + id;
+        RLock lock = redissonClient.getLock(lockKey);
         R r = null;
         try {
-            boolean isLock = tryLock(lockKey);
-            // 4.2.判断是否获取成功
+            // 4.2.尝试获取锁，最多等待 1 秒
+            boolean isLock = lock.tryLock(1, TimeUnit.SECONDS);
             if (!isLock) {
                 // 4.3.获取锁失败，休眠并重试
                 Thread.sleep(50);
@@ -159,10 +163,13 @@ public class CacheClient {
             // 6.存在，写入redis
             this.set(key, r, time, unit);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
-        }finally {
-            // 7.释放锁
-            unlock(lockKey);
+        } finally {
+            // 7.释放锁（Redisson 自动校验是否是当前线程持有的锁，不会误删）
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
         }
         // 8.返回
         return r;
@@ -202,14 +209,5 @@ public class CacheClient {
         // 5.存在，写入redis
         this.set(key, r, time, unit);
         return r;
-    }
-
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
-        return BooleanUtil.isTrue(flag);
-    }
-
-    private void unlock(String key) {
-        stringRedisTemplate.delete(key);
     }
 }

@@ -42,7 +42,7 @@ public class SeckillLoadTest {
         System.out.println("╚══════════════════════════════════════════════╝\n");
 
         // ========== 第1步：批量登录获取 token ==========
-        int userCount = 200;
+        int userCount = 500;
         System.out.println("第1步：批量登录 " + userCount + " 个用户...");
         List<String> tokens = batchLogin(userCount);
         System.out.println("登录完成 ✅ 获取到 " + tokens.size() + " 个 token\n");
